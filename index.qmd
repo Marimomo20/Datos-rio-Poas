@@ -1,0 +1,166 @@
+---
+title: "Río Poás"
+author: "Mariana Morales"
+format:
+  html:
+    toc: true      # Activa el índice
+    toc-title: "Índice"  # Cambia el título del índice (opcional)
+    toc-depth: 2   # Profundidad del índice (niveles de encabezado)
+    number-sections: true  # Numera las secciones
+editor: visual
+---
+
+## Generalidades
+
+Estos datos pertenecen a un transecto del río Poás de Alajuela ubicado en Finca La Hilda. El código presentado más adelante fue creado para construir una gráfica interactiva por medio de 2 archivos importantes, uno que contiene la información de los sensores "Datos sensores.csv" y el otro archivo contiene la fecha y hora de cada uno de los videos disponibles "videos.csv". Consulte la disponibilidad de datos en el siguiente correo mariana.moralesmorales\@ucr.ac.cr. El objetivo con esta gráfica es tener una descripción visual de los datos y los videos para seleccionar los que corresponden a los eventos más significativos, posteriormente los videos seleccionados serán procesados con el software Fudaa.
+
+## Variables
+
+La variable "VEGA_E" se refiere al sensor de nivel del río y la variable "vitesse" corresponde al sensor de velocidad, sin embargo, el mismo dejó de funcionar el 03 de noviembre del 2024 a las 00:20. Por lo tanto para la creación de la gráfica solo se ha tomado en cuenta el nivel del río.
+
+## Código
+
+Este código fue creado utilizando Rstudio version 2024.12.1 mediante la creación de un documeto quarto.
+
+```{r}
+#| warning: false
+#| message: false
+
+# Cargar librerías
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(readr)
+library(plotly)
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Cargar los archivos
+videos <- read_delim("videos.csv", delim = ";", col_types = cols(.default = "c"))
+datos <- read_delim("Datos sensores.csv", delim = ";", col_types = cols(.default = "c"))
+```
+
+```{r}
+#| warning: false
+#| message: false
+ 
+# Convertir VEGA_E a numérico, reemplazando comas por puntos
+datos <- datos %>% mutate(VEGA_E = as.numeric(gsub(",", ".", VEGA_E)))
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Convertir las fechas y horas a formato datetime
+videos <- videos %>% mutate(DateTime = dmy_hms(paste(Date, Time)))
+datos <- datos %>% mutate(DateTime = dmy_hms(paste(Date, Time)))
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Redondear al minuto más cercano
+videos <- videos %>% mutate(DateTime = round_date(DateTime, "minute"))
+datos <- datos %>% mutate(DateTime = round_date(DateTime, "minute"))
+
+# Eliminar filas con valores nulos en DateTime
+videos <- videos %>% filter(!is.na(DateTime))
+datos <- datos %>% filter(!is.na(DateTime))
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Ordenar por DateTime
+videos <- videos %>% arrange(DateTime)
+datos <- datos %>% arrange(DateTime)
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Función para encontrar el valor más cercano
+encontrar_mas_cercano <- function(fecha, df) {
+  dif <- abs(difftime(df$DateTime, fecha, units = "secs"))
+  df$VEGA_E[which.min(dif)]
+}
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Aplicar la función para asignar el valor más cercano de VEGA_E
+videos <- videos %>% mutate(VEGA_E = sapply(DateTime, encontrar_mas_cercano, df = datos))
+
+# Guardar el resultado final con ; como separador
+write_delim(videos, "valores_vega_filtrados.csv", delim = ";")
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Cargar el archivo generado correctamente
+valores_filtrados <- read_delim("valores_vega_filtrados.csv", delim = ";", col_types = cols(DateTime = col_character(), VEGA_E = col_double()))
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Convertir DateTime nuevamente a formato datetime
+valores_filtrados <- valores_filtrados %>% mutate(DateTime = ymd_hms(DateTime))
+
+```
+
+## Gráfica interactiva
+
+```{r}
+#| warning: false
+#| message: false
+
+# Crear la gráfica interactiva
+fig <- plot_ly()
+
+# Agregar la serie original de VEGA_E
+fig <- fig %>% add_trace(
+  x = datos$DateTime, 
+  y = datos$VEGA_E, 
+  type = "scatter", 
+  mode = "lines", 
+  name = "VEGA_E Original",
+  line = list(color = "blue")
+)
+
+# Agregar la serie filtrada de VEGA_E
+fig <- fig %>% add_trace(
+  x = valores_filtrados$DateTime, 
+  y = valores_filtrados$VEGA_E, 
+  type = "scatter", 
+  mode = "markers", 
+  name = "VEGA_E - Videos",
+  marker = list(color = "red", size = 6)
+)
+
+# Personalizar el diseño con mayor ancho
+fig <- fig %>% layout(
+  title = "Comparación de VEGA_E - Serie Completa vs. Videos",
+  xaxis = list(title = "Fecha", type = "date"),
+  yaxis = list(title = "VEGA_E"),
+  hovermode = "x",
+  width = 800,  # Aumenta el ancho de la gráfica
+  height = 400   # Mantiene una altura moderada
+)
+
+
+# Mostrar la gráfica interactiva
+fig
+```
