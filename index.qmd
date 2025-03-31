@@ -56,7 +56,7 @@ datos <- datos %>% mutate(VEGA_E = as.numeric(gsub(",", ".", VEGA_E)))
 #| message: false
 
 # Convertir las fechas y horas a formato datetime
-videos <- videos %>% mutate(DateTime = dmy_hms(paste(Date, Time)))
+videos <- videos %>% mutate(DateTime = dmy_hms(paste(Fecha, Hora)))
 datos <- datos %>% mutate(DateTime = dmy_hms(paste(Date, Time)))
 ```
 
