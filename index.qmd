@@ -41,6 +41,10 @@ library(plotly)
 # Cargar los archivos
 videos <- read_delim("videos.csv", delim = ";", col_types = cols(.default = "c"))
 datos <- read_delim("Datos sensores.csv", delim = ";", col_types = cols(.default = "c"))
+
+# Cargar el nuevo archivo de muestras
+muestras <- read_delim("Muestras.csv", delim = ";", col_types = cols(.default = "c"))
+
 ```
 
 ```{r}
@@ -49,6 +53,15 @@ datos <- read_delim("Datos sensores.csv", delim = ";", col_types = cols(.default
  
 # Convertir VEGA_E a numérico, reemplazando comas por puntos
 datos <- datos %>% mutate(VEGA_E = as.numeric(gsub(",", ".", VEGA_E)))
+
+# Convertir y reemplazar comas por puntos
+muestras <- muestras %>% mutate(
+  DateTime = dmy_hm(DateTime),
+  Conductividad = as.numeric(gsub(",", ".", Conductividad)),
+  pH = as.numeric(gsub(",", ".", pH)),
+  Temperatura = as.numeric(gsub(",", ".", Temperatura)),
+  Concentracion = as.numeric(gsub(",", ".", Concentracion))
+)
 ```
 
 ```{r}
@@ -58,6 +71,7 @@ datos <- datos %>% mutate(VEGA_E = as.numeric(gsub(",", ".", VEGA_E)))
 # Convertir las fechas y horas a formato datetime
 videos <- videos %>% mutate(DateTime = dmy_hms(paste(Fecha, Hora)))
 datos <- datos %>% mutate(DateTime = dmy_hms(paste(Date, Time)))
+
 ```
 
 ```{r}
@@ -67,6 +81,7 @@ datos <- datos %>% mutate(DateTime = dmy_hms(paste(Date, Time)))
 # Redondear al minuto más cercano
 videos <- videos %>% mutate(DateTime = round_date(DateTime, "minute"))
 datos <- datos %>% mutate(DateTime = round_date(DateTime, "minute"))
+muestras <- muestras %>% mutate(DateTime= round_date(DateTime, "minute"))
 
 # Eliminar filas con valores nulos en DateTime
 videos <- videos %>% filter(!is.na(DateTime))
@@ -80,6 +95,8 @@ datos <- datos %>% filter(!is.na(DateTime))
 # Ordenar por DateTime
 videos <- videos %>% arrange(DateTime)
 datos <- datos %>% arrange(DateTime)
+muestras <- muestras %>% arrange(DateTime)
+
 ```
 
 ```{r}
@@ -88,7 +105,7 @@ datos <- datos %>% arrange(DateTime)
 
 # Función para encontrar el valor más cercano
 encontrar_mas_cercano <- function(fecha, df) {
-  dif <- abs(difftime(df$DateTime, fecha, units = "secs"))
+  dif <- abs(difftime(df$DateTime, fecha, units = "mins"))
   df$VEGA_E[which.min(dif)]
 }
 ```
@@ -99,6 +116,8 @@ encontrar_mas_cercano <- function(fecha, df) {
 
 # Aplicar la función para asignar el valor más cercano de VEGA_E
 videos <- videos %>% mutate(VEGA_E = sapply(DateTime, encontrar_mas_cercano, df = datos))
+muestras <- muestras %>% mutate(VEGA_E = sapply(DateTime, encontrar_mas_cercano, df = datos))
+
 
 # Guardar el resultado final con ; como separador
 write_delim(videos, "valores_vega_filtrados.csv", delim = ";")
@@ -121,6 +140,56 @@ valores_filtrados <- valores_filtrados %>% mutate(DateTime = ymd_hms(DateTime))
 
 ```
 
+## Carga de los datos de lluvia
+
+```{r}
+#| warning: false
+#| message: false
+
+# Cargar el archivo Lluvia.csv
+lluvia <- read_delim("Lluvia.csv", delim = ";", col_types = cols(.default = "c"))
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+
+# Convertir la columna 'date' y 'time' en una columna DateTime
+lluvia$DateTime <- as.POSIXct(paste(lluvia$date, lluvia$time), format = "%d/%m/%Y %H:%M:%S")
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+
+# Convertir y reemplazar comas por puntos
+lluvia <- lluvia %>% mutate(Rain = as.numeric(gsub(",", ".", Rain)))
+
+
+```
+
+
+```{r}
+#| warning: false
+#| message: false
+
+# Acumulado de 1 hora
+lluvia_1h <- lluvia %>%
+  mutate(Hora = floor_date(DateTime, "hour")) %>%  # Agrupar por hora
+  group_by(Hora) %>%
+  summarise(Rain_1h = sum(Rain, na.rm = TRUE))
+
+# Acumulado de 3 horas
+lluvia_3h <- lluvia %>%
+  mutate(Hora_3h = floor_date(DateTime, "3 hours")) %>%  # Agrupar por 3 horas
+  group_by(Hora_3h) %>%
+  summarise(Rain_3h = sum(Rain, na.rm = TRUE))
+
+```
+
+
 ## Gráfica interactiva
 
 ```{r}
@@ -130,36 +199,122 @@ valores_filtrados <- valores_filtrados %>% mutate(DateTime = ymd_hms(DateTime))
 # Crear la gráfica interactiva
 fig <- plot_ly()
 
-# Agregar la serie original de VEGA_E
+# Agregar la serie original de VEGA_E en el eje primario (izquierdo)
 fig <- fig %>% add_trace(
   x = datos$DateTime, 
   y = datos$VEGA_E, 
   type = "scatter", 
   mode = "lines", 
   name = "VEGA_E Original",
-  line = list(color = "blue")
+  line = list(color = "blue"),
+  yaxis = "y1"
 )
 
-# Agregar la serie filtrada de VEGA_E
+# Agregar la serie filtrada de VEGA_E en el eje primario (izquierdo)
 fig <- fig %>% add_trace(
   x = valores_filtrados$DateTime, 
   y = valores_filtrados$VEGA_E, 
   type = "scatter", 
   mode = "markers", 
   name = "VEGA_E - Videos",
-  marker = list(color = "red", size = 6)
+  marker = list(color = "red", size = 6),
+  yaxis = "y1"
 )
 
-# Personalizar el diseño con mayor ancho
+# Agregar Conductividad en el eje secundario (derecho)
+fig <- fig %>% add_trace(
+  x = muestras$DateTime, 
+  y = muestras$`Conductividad`, 
+  type = "scatter", 
+  mode = "markers", 
+  name = "Conductividad",
+  marker = list(color = "green", size = 6),
+  yaxis = "y2",
+  visible = "legendonly"
+)
+
+# Agregar pH en el eje secundario (derecho)
+fig <- fig %>% add_trace(
+  x = muestras$DateTime, 
+  y = muestras$`pH`, 
+  type = "scatter", 
+  mode = "markers", 
+  name = "pH",
+  marker = list(color = "purple", size = 6),
+  yaxis = "y2",
+  visible = "legendonly"
+)
+
+# Agregar Temperatura en el eje secundario (derecho)
+fig <- fig %>% add_trace(
+  x = muestras$DateTime, 
+  y = muestras$`Temperatura`, 
+  type = "scatter", 
+  mode = "markers", 
+  name = "Temperatura",
+  marker = list(color = "orange", size = 6),
+  yaxis = "y2",
+  visible = "legendonly"
+)
+
+# Agregar Concentración de sedimento en el eje secundario (derecho)
+fig <- fig %>% add_trace(
+  x = muestras$DateTime, 
+  y = muestras$`Concentracion`, 
+  type = "scatter", 
+  mode = "markers", 
+  name = "Concentración Sedimento",
+  marker = list(color = "brown", size = 6),
+  yaxis = "y2",
+  visible = "legendonly"
+)
+
+# Agregar lluvia acumulada de 1 hora en el eje secundario como barras invertidas
+fig <- fig %>% add_trace(
+  x = lluvia_1h$Hora, 
+  y = -lluvia_1h$Rain_1h,  # Invertimos los valores
+  type = "bar", 
+  name = "Lluvia Acumulada (1h)",
+  marker = list(color = "cadetblue"),
+  yaxis = "y2"
+)
+
+# Agregar lluvia acumulada de 3 horas en el eje secundario como barras invertidas
+fig <- fig %>% add_trace(
+  x = lluvia_3h$Hora_3h, 
+  y = -lluvia_3h$Rain_3h,  # Invertimos los valores
+  type = "bar", 
+  name = "Lluvia Acumulada (3h)",
+  marker = list(color = "midnightblue"),
+  yaxis = "y2"
+)
+
 fig <- fig %>% layout(
-  title = "Comparación de VEGA_E - Serie Completa vs. Videos",
+  title = "Comparación de VEGA_E y Parámetros de Muestras",
   xaxis = list(title = "Fecha", type = "date"),
-  yaxis = list(title = "VEGA_E"),
+  yaxis = list(
+    title = "VEGA_E",
+    side = "left",
+    showgrid = FALSE
+  ),
+  yaxis2 = list(
+    side = "right",
+    overlaying = "y",
+    showgrid = TRUE,
+    title_standoff = 30,  # Ajusta la distancia entre el título y el eje
+    ticklen = 6,          # Ajusta la longitud de las marcas de los ticks
+    tickangle = 0         # Puedes ajustar el ángulo si los números siguen siendo cortados
+  ),
+  legend = list(
+    orientation = "h",     # horizontal
+    x = 0,                 # alineado a la izquierda
+    y = -0.2               # debajo del eje X
+  ),
   hovermode = "x",
-  width = 800,  # Aumenta el ancho de la gráfica
-  height = 400   # Mantiene una altura moderada
+  width = 800,
+  height = 450,
+  margin = list(r = 100)  # Ajusta el margen derecho para dar espacio al eje secundario
 )
-
 
 # Mostrar la gráfica interactiva
 fig
