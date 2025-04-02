@@ -32,6 +32,7 @@ library(lubridate)
 library(ggplot2)
 library(readr)
 library(plotly)
+library(zoo)
 ```
 
 ```{r}
@@ -140,6 +141,29 @@ valores_filtrados <- valores_filtrados %>% mutate(DateTime = ymd_hms(DateTime))
 
 ```
 
+```{r}
+#| warning: false
+#| message: false
+
+# Crear una columna que identifica si el dato es de "día" o "noche"
+valores_filtrados <- valores_filtrados %>%
+  mutate(Hora = hour(DateTime) + minute(DateTime)/60, # Convertir a horas decimales
+         Dia_Noche = ifelse(
+           Hora >= 7 & Hora <= 17.5, "Dia", "Noche"))
+
+# Crear una columna con los colores según "Dia" o "Noche"
+valores_filtrados <- valores_filtrados %>%
+  mutate(color = ifelse(Dia_Noche == "Dia", 'gold', 'darkslategrey'))
+
+#Seleccionar columnas importantes
+valores_filtrados <- select(valores_filtrados, DateTime, VEGA_E, color)
+
+#Eliminar filas con valores nulos
+valores_filtrados <- na.omit(valores_filtrados)
+```
+
+
+
 ## Carga de los datos de lluvia
 
 ```{r}
@@ -187,7 +211,16 @@ lluvia_3h <- lluvia %>%
   group_by(Hora_3h) %>%
   summarise(Rain_3h = sum(Rain, na.rm = TRUE))
 
+# Acumulado de 12 horas
+lluvia_12h <- lluvia %>%
+  mutate(Hora_12h = floor_date(DateTime, "12 hours")) %>%  # Agrupar por 12 horas
+  group_by(Hora_12h) %>%
+  summarise(Rain_12h = sum(Rain, na.rm = TRUE))
+
 ```
+
+
+
 
 
 ## Gráfica interactiva
@@ -205,19 +238,23 @@ fig <- fig %>% add_trace(
   y = datos$VEGA_E, 
   type = "scatter", 
   mode = "lines", 
-  name = "VEGA_E Original",
+  name = "Nivel",
   line = list(color = "blue"),
   yaxis = "y1"
 )
 
-# Agregar la serie filtrada de VEGA_E en el eje primario (izquierdo)
+
+# Agregar la serie de VEGA_E filtrado en el eje primario (izquierdo)
 fig <- fig %>% add_trace(
   x = valores_filtrados$DateTime, 
   y = valores_filtrados$VEGA_E, 
   type = "scatter", 
   mode = "markers", 
-  name = "VEGA_E - Videos",
-  marker = list(color = "red", size = 6),
+  name = "Videos",
+  marker = list(
+    color = valores_filtrados$color, # Usar la columna 'color'
+    size = 6
+  ),
   yaxis = "y1"
 )
 
@@ -227,7 +264,7 @@ fig <- fig %>% add_trace(
   y = muestras$`Conductividad`, 
   type = "scatter", 
   mode = "markers", 
-  name = "Conductividad",
+  name = "Conductividad (uS/cm)",
   marker = list(color = "green", size = 6),
   yaxis = "y2",
   visible = "legendonly"
@@ -251,7 +288,7 @@ fig <- fig %>% add_trace(
   y = muestras$`Temperatura`, 
   type = "scatter", 
   mode = "markers", 
-  name = "Temperatura",
+  name = "Temperatura (°C)",
   marker = list(color = "orange", size = 6),
   yaxis = "y2",
   visible = "legendonly"
@@ -263,11 +300,12 @@ fig <- fig %>% add_trace(
   y = muestras$`Concentracion`, 
   type = "scatter", 
   mode = "markers", 
-  name = "Concentración Sedimento",
+  name = "Concentración (g/L)",
   marker = list(color = "brown", size = 6),
   yaxis = "y2",
   visible = "legendonly"
 )
+
 
 # Agregar lluvia acumulada de 1 hora en el eje secundario como barras invertidas
 fig <- fig %>% add_trace(
@@ -276,7 +314,8 @@ fig <- fig %>% add_trace(
   type = "bar", 
   name = "Lluvia Acumulada (1h)",
   marker = list(color = "cadetblue"),
-  yaxis = "y2"
+  yaxis = "y2",
+  visible = "legendonly"
 )
 
 # Agregar lluvia acumulada de 3 horas en el eje secundario como barras invertidas
@@ -286,7 +325,19 @@ fig <- fig %>% add_trace(
   type = "bar", 
   name = "Lluvia Acumulada (3h)",
   marker = list(color = "midnightblue"),
-  yaxis = "y2"
+  yaxis = "y2",
+  visible = "legendonly"
+)
+
+# Agregar lluvia acumulada de 12 horas en el eje secundario como barras invertidas
+fig <- fig %>% add_trace(
+  x = lluvia_12h$Hora_12h, 
+  y = -lluvia_12h$Rain_12h,  # Invertimos los valores
+  type = "bar", 
+  name = "Lluvia Acumulada (12h)",
+  marker = list(color = "darkturquoise"),
+  yaxis = "y2",
+  visible = "legendonly"
 )
 
 fig <- fig %>% layout(
@@ -301,9 +352,9 @@ fig <- fig %>% layout(
     side = "right",
     overlaying = "y",
     showgrid = TRUE,
-    title_standoff = 30,  # Ajusta la distancia entre el título y el eje
-    ticklen = 6,          # Ajusta la longitud de las marcas de los ticks
-    tickangle = 0         # Puedes ajustar el ángulo si los números siguen siendo cortados
+    title_standoff = 30,  # Ajustar la distancia entre el título y el eje
+    ticklen = 6,          # Ajustar la longitud de las marcas de los ticks
+    tickangle = 0         # Ajustar el ángulo
   ),
   legend = list(
     orientation = "h",     # horizontal
@@ -313,9 +364,95 @@ fig <- fig %>% layout(
   hovermode = "x",
   width = 800,
   height = 450,
-  margin = list(r = 100)  # Ajusta el margen derecho para dar espacio al eje secundario
+  margin = list(r = 100)  # Ajustar el margen derecho para dar espacio al eje secundario
 )
 
 # Mostrar la gráfica interactiva
 fig
 ```
+
+## Gráfico de velocidad 
+
+```{r}
+#| warning: false
+#| message: false
+
+# Convertir Vitesse a numérico
+datos <- datos %>% mutate(Vitesse = as.numeric(gsub(",", ".", Vitesse)))
+
+# Calcular el rango intercuartílico (IQR)
+Q1 <- quantile(datos$Vitesse, 0.25, na.rm = TRUE)
+Q3 <- quantile(datos$Vitesse, 0.75, na.rm = TRUE)
+IQR_value <- Q3 - Q1
+
+# Definir los límites para detectar outliers
+limite_inferior <- Q1 - 1.5 * IQR_value
+limite_superior <- Q3 + 1.5 * IQR_value
+
+# Crear una nueva columna indicando si el valor es outlier
+datos <- datos %>%
+  mutate(Outlier = ifelse(Vitesse < limite_inferior | Vitesse > limite_superior, "Sí", "No"))
+
+# Filtrar datos extremos para mejorar la escala del gráfico
+datos_filtrados <- datos %>% filter(Vitesse <- 7000 | Vitesse >- 200)
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Gráfico boxplot interactivo de Vitesse mejorado
+fig_vitesse <- plot_ly(
+  data = datos_filtrados,
+  y = ~Vitesse,
+  type = "box",
+  boxpoints = "outliers",
+  marker = list(color = "red", opacity = 0.5),
+  line = list(color = "blue"),
+  name = "Vitesse"
+)
+
+# Mostrar el gráfico
+fig_vitesse
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Ordenar los datos por tiempo
+datos <- datos %>% arrange(DateTime)
+
+# Crear la ventana de 40 minutos (ajustable según el intervalo de los datos)
+ventana <- 40  # En minutos
+
+# Calcular el promedio móvil usando una ventana de 40 minutos
+datos$Vitesse_ma <- rollapply(datos$Vitesse, width = ventana, FUN = mean, fill = NA, align = "center")
+
+# Calcular la diferencia porcentual
+datos$Diferencia <- abs(datos$Vitesse - datos$Vitesse_ma) / datos$Vitesse_ma
+
+# Identificar valores que difieran en más del 30%
+datos$Vitesse_corregida <- ifelse(datos$Diferencia > 0.30, NA, datos$Vitesse)
+
+# Visualizar los datos corregidos
+head(datos)
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# Crear gráfico interactivo con puntos en lugar de líneas
+fig <- plot_ly(datos, x = ~DateTime) %>%
+  add_trace(y = ~Vitesse, name = "Vitesse Original", mode = 'markers', marker = list(color = 'red', size = 5, opacity = 0.5)) %>%
+  add_trace(y = ~Vitesse_corregida, name = "Vitesse Corregida", mode = 'markers', marker = list(color = 'blue', size = 5)) %>%
+  layout(title = "Evolución de Vitesse en el Tiempo",
+         xaxis = list(title = "Tiempo"),
+         yaxis = list(title = "Vitesse"),
+         hovermode = "x unified") 
+
+# Mostrar gráfico
+fig
+```
+
